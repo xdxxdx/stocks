@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:context="http://www.springframework.org/schema/context" xmlns:mvc="http://www.springframework.org/schema/mvc"
+	xmlns:rabbit="http://www.springframework.org/schema/rabbit"
+	xsi:schemaLocation="http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc-3.0.xsd
+		http://www.springframework.org/schema/rabbit http://www.springframework.org/schema/rabbit/spring-rabbit-1.0.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd">
+
+	<bean id="stockServiceGateway" class="org.springframework.amqp.rabbit.stocks.gateway.RabbitStockServiceGateway">
+		<property name="rabbitTemplate">
+			<rabbit:template connection-factory="connectionFactory" routing-key="app.stock.request"
+				message-converter="jsonMessageConverter" />
+		</property>
+		<property name="defaultReplyTo" value="fanout://broadcast.responses/" />
+	</bean>
+
+	<rabbit:queue id="tradeQueue" />
+
+	<rabbit:queue id="marketDataQueue" />
+
+	<fanout-exchange name="broadcast.responses" xmlns="http://www.springframework.org/schema/rabbit">
+		<bindings>
+			<!-- Bind a fanout to an anonymous queue unique for this node, then all nodes in a cluster get the same response -->
+			<binding queue="tradeQueue" />
+		</bindings>
+	</fanout-exchange>
+
+	<topic-exchange name="app.stock.marketdata" xmlns="http://www.springframework.org/schema/rabbit">
+		<bindings>
+			<!-- Bind to anonymous queue for market data so all nodes configured this way get all quotes -->
+			<binding queue="marketDataQueue" pattern="${stocks.quote.pattern}" />
+		</bindings>
+	</topic-exchange>
+
+	<listener-container connection-factory="connectionFactory" message-converter="jsonMessageConverter"
+		xmlns="http://www.springframework.org/schema/rabbit">
+		<listener ref="quoteController" method="handleQuote" queues="marketDataQueue" />
+		<listener ref="quoteController" method="handleTrade" queues="tradeQueue" />
+	</listener-container>
+
+	<rabbit:admin connection-factory="connectionFactory" auto-startup="true" />
+
+	<context:property-placeholder location="classpath:/client.properties" />
+
+	<bean id="quoteController" class="org.springframework.amqp.rabbit.stocks.web.QuoteController">
+		<property name="stockServiceGateway" ref="stockServiceGateway" />
+	</bean>
+
+	<mvc:resources location="file:./src/main/resources/static/,classpath:/static/" mapping="static/**" />
+
+	<mvc:default-servlet-handler />
+
+	<mvc:annotation-driven />
+
+</beans>
